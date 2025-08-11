@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>3-3 じゃがバター予約</title>
+  <style>
+    body {
+      font-family: "メイリオ", meiryo, sans-serif;
+      max-width: 600px;
+      margin: auto;
+      padding: 1rem;
+      word-break: keep-all;
+    }
+    input, button {
+      font-size: 1.2rem;
+      width: 100%;
+      margin: 0.4rem 0;
+      padding: 0.6rem;
+      box-sizing: border-box;
+    }
+    .error {
+      color: red;
+    }
+    .reservation-info {
+      border: 1px solid #aaa;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>3-3 じゃがバター予約システム</h1>
+
+  <div id="form-area">
+    <label for="count">予約人数（1〜3人）</label>
+    <input type="number" id="count" min="1" max="3" />
+    <button onclick="makeReservation()">予約する</button>
+    <p class="error" id="error-msg"></p>
+  </div>
+
+  <div id="reservation-info" class="reservation-info" style="display:none;">
+    <h2>予約情報</h2>
+    <p>受付番号: <span id="res-id"></span></p>
+    <p>待ち人数: <span id="waiting-count"></span></p>
+    <p>待ち時間: <span id="waiting-time"></span> 分</p>
+    <button onclick="cancelReservation()">キャンセルする</button>
+  </div>
+
+  <script>
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwOxVB2RkS1hxM5O5gKShcAPiGvZXjOrZ_Tx9H6J8dyaM-3BKF8MywkoyKgUA5zW_xR/exec'; // 
+    const timePerItem = 15 / 19; // 1個あたりの製造時間（分）
+    let myReservationId = null;
+    let myCount = 0;
+
+    async function apiRequest(params) {
+      const url = new URL(GAS_API_URL);
+      Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+      const res = await fetch(url, { method: 'GET' });
+      return await res.json();
+    }
+
+    async function makeReservation() {
+      const count = parseInt(document.getElementById('count').value);
+      const errorMsg = document.getElementById('error-msg');
+      errorMsg.textContent = '';
+
+      if (!count || count < 1 || count > 3) {
+        errorMsg.textContent = '予約人数は1〜3で入力してください。';
+        return;
+      }
+
+      const res = await apiRequest({ action: 'addReservation', count });
+
+      if (res.success) {
+        myReservationId = res.id;
+        myCount = count;
+        saveReservationId();
+        showReservationInfo();
+        document.getElementById('form-area').style.display = 'none';
+        updateReservationInfo();
+      } else {
+        errorMsg.textContent = res.message;
+      }
+    }
+
+    async function cancelReservation() {
+      if (!myReservationId) return;
+      const res = await apiRequest({ action: 'updateStatus', id: myReservationId, status: 'キャンセル' });
+      if (res.success) {
+        alert('キャンセルしました。');
+        clearReservation();
+      } else {
+        alert('キャンセル失敗: ' + res.message);
+      }
+    }
+
+    function showReservationInfo() {
+      document.getElementById('reservation-info').style.display = 'block';
+    }
+
+    async function updateReservationInfo() {
+      if (!myReservationId) return;
+
+      const reservationsRes = await apiRequest({ action: 'getReservations' });
+      if (!reservationsRes.success) {
+        alert('予約情報取得に失敗しました。');
+        return;
+      }
+      const reservations = reservationsRes.data;
+
+      let waitingPeople = 0;
+      let found = false;
+      for (const r of reservations) {
+        if (r.id === myReservationId) {
+          found = true;
+          break;
+        }
+        waitingPeople += r.count;
+      }
+      if (!found) {
+        alert('予約が見つかりません。キャンセルされた可能性があります。');
+        clearReservation();
+        return;
+      }
+
+      const offsetRes = await apiRequest({ action: 'getWaitingTimeOffset' });
+      const offset = offsetRes.success ? offsetRes.offset : 0;
+
+      const waitingTime = Math.max(0, waitingPeople * timePerItem + offset);
+
+      document.getElementById('res-id').textContent = myReservationId;
+      document.getElementById('waiting-count').textContent = waitingPeople;
+      document.getElementById('waiting-time').textContent = waitingTime.toFixed(1);
+    }
+
+    function clearReservation() {
+      myReservationId = null;
+      myCount = 0;
+      localStorage.removeItem('reservationId');
+      document.getElementById('reservation-info').style.display = 'none';
+      document.getElementById('form-area').style.display = 'block';
+      document.getElementById('count').value = '';
+      document.getElementById('error-msg').textContent = '';
+    }
+
+    function saveReservationId() {
+      if (myReservationId) {
+        localStorage.setItem('reservationId', myReservationId);
+      }
+    }
+
+    window.onload = () => {
+      const savedId = localStorage.getItem('reservationId');
+      if (savedId) {
+        myReservationId = parseInt(savedId);
+        document.getElementById('form-area').style.display = 'none';
+        showReservationInfo();
+        updateReservationInfo();
+      }
+    };
+
+    setInterval(() => {
+      if (myReservationId) {
+        updateReservationInfo();
+      }
+    }, 10000);
+  </script>
+</body>
+</html>
